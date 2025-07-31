@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 // import './index.css'; // This line is commented out/removed as your app uses Tailwind CSS
-import ANYA from './ANYA'; // Import your ANYA component (assuming you renamed App.js to ANYA.js)
+import ANYA from './Anya'; // Import your ANYA component (assuming you renamed App.js to ANYA.js)
 import reportWebVitals from './reportWebVitals';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
