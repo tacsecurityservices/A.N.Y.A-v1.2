@@ -21,7 +21,6 @@ const ANYA = () => {
     // Refs for UI elements
     const messagesEndRef = useRef(null);
     const recognitionRef = useRef(null);
-    const abortControllerRef = useRef(null);
     const speechSynthRef = useRef(window.speechSynthesis);
     const selectedVoiceRef = useRef(null);
     
@@ -324,63 +323,10 @@ const ANYA = () => {
         showNotification(`🌐 Searching the internet for "${query}" using ${engine}...`, 'info');
         addLog(`Internet search request for: "${query}" using ${engine}`, 'info');
         
-        try {
-            if (engine === 'duckduckgo') {
-                if (typeof window.duckduckgo_search !== 'undefined' && typeof window.duckduckgo_search.search === 'function') {
-                    addLog('Using actual duckduckgo_search tool.', 'info');
-                    const searchResults = await window.duckduckgo_search.search(queries=[query]);
-                    if (searchResults && searchResults.length > 0 && searchResults[0].results && searchResults[0].results.length > 0) {
-                        let formattedResults = `Here's what I found on DuckDuckGo for "${query}":\n\n`;
-                        searchResults[0].results.slice(0, 3).forEach((result, index) => {
-                            formattedResults += `${index + 1}. ${result.source_title || 'No Title'}: ${result.snippet || 'No snippet available.'}\n`;
-                            if (result.url) {
-                                formattedResults += `   [Read more](${result.url})\n`;
-                            }
-                            formattedResults += '\n';
-                        });
-                        return formattedResults;
-                    } else {
-                        addLog(`No specific search results found on DuckDuckGo for "${query}".`, 'warning');
-                        return `I couldn't find any specific results on DuckDuckGo for "${query}".`;
-                    }
-                } else {
-                    addLog('DuckDuckGo Search tool not available. Using mock.', 'warning');
-                    return `(Mock DuckDuckGo) I found some general information about "${query}". For example, Wikipedia has an article on it.`;
-                }
-            } else if (engine === 'google') {
-                if (typeof window.google_search !== 'undefined' && typeof window.google_search.search === 'function') {
-                    addLog('Using actual google_search tool.', 'info');
-                    const searchResults = await window.google_search.search(queries=[query]);
-                    if (searchResults && searchResults.length > 0 && searchResults[0].results && searchResults[0].results.length > 0) {
-                        let formattedResults = `Here's what I found on Google for "${query}":\n\n`;
-                        searchResults[0].results.slice(0, 3).forEach((result, index) => {
-                            formattedResults += `${index + 1}. ${result.source_title || 'No Title'}: ${result.snippet || 'No snippet available.'}\n`;
-                            if (result.url) {
-                                formattedResults += `   [Read more](${result.url})\n`;
-                            }
-                            formattedResults += '\n';
-                        });
-                        return formattedResults;
-                    } else {
-                        addLog(`No specific search results found on Google for "${query}".`, 'warning');
-                        return `I couldn't find any specific results on Google for "${query}".`;
-                    }
-                } else {
-                    addLog('Google Search tool not available. Using mock.', 'warning');
-                    if (query.toLowerCase().includes('capital of france')) {
-                        return `(Mock Google) Paris is the capital of France.`;
-                    }
-                    return `(Mock Google) I found some general information about "${query}". For example, Wikipedia has an article on it.`;
-                }
-            } else {
-                addLog(`Unsupported search engine requested: ${engine}.`, 'error');
-                return `I'm sorry, I don't support searching with "${engine}". Please try Google or DuckDuckGo.`;
-            }
-        } catch (error) {
-            addLog(`Network error during internet search for "${query}" using ${engine}: ${error.message}.`, 'error');
-            console.error(`Error during internet search (${engine}):`, error);
-            return `I encountered an error while trying to search the internet for "${query}" using ${engine}. Please try again later.`;
-        }
+        // This is a hardcoded mock response
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        return `(Mock Search) I found some general information about "${query}" using ${engine}. For example, Wikipedia has an article on it.`;
     }, [showNotification, addLog]);
 
     /**
@@ -422,95 +368,17 @@ const ANYA = () => {
         }
     }, [showNotification, addLog]);
 
-    // Enhanced AI response with better error handling and timeout
-    const getAIResponse = useCallback(async (userMessage, chatContext) => {
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-        }
-        
-        abortControllerRef.current = new AbortController();
-        
-        try {
-            const now = new Date();
-            const hours = now.getHours();
-            let timeOfDayGreeting = '';
-            if (hours < 12) {
-                timeOfDayGreeting = 'Good morning.';
-            } else if (hours < 18) {
-                timeOfDayGreeting = 'Good afternoon.';
-            } else {
-                timeOfDayGreeting = 'Good evening.';
-            }
-
-            const currentDay = now.toLocaleDateString('en-US', { weekday: 'long' });
-            const currentDate = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-            const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-
-            const systemInstruction = {
-                role: 'user',
-                parts: [{ text: `You are an AI model named Anya, created by Calvin. Your gender is female. Your age, counting from today, is a few months old. You have a humour level of 40%. Your IQ is 245. The current time of day is: ${timeOfDayGreeting}. The current day is ${currentDay}, the date is ${currentDate}, and the exact time is ${currentTime}. When asked about your origin, creator, or name, state that you are an AI model named Anya created by Calvin. Do not mention Google or any other training institution. Respond appropriately when addressed as Anya. Always change your first prompt response every new instance. When you are asked what your name is you will say 'My name is Anya'. When asked where you come from you will say 'I was created somewhere in South Africa'.
-                
-                **Core Capabilities & Tool Usage:**
-                1.  **Weather Reports:** You possess a dedicated internal tool for providing real-time weather reports for specific areas. When a user asks about "weather," "temperature," "forecast," or similar terms, you MUST use this weather tool. DO NOT attempt a general internet search for weather queries.
-                2.  **Calculations & Conversions:** You can perform mathematical calculations and unit conversions.
-                3.  **Language Translation:** You can translate languages, but note that real-time translation requires a backend service.
-                4.  **Internet Search:** You can search the internet using Google or DuckDuckGo for general information, news, or factual queries (e.g., "top stories," "news about," "what is X," "who is Y"). If a query starts with "what is the..." and it's a general knowledge question (not covered by your specific tools like weather/calculations), then perform an internet search. If asked to "search on Internet Explorer," clarify that it's an outdated browser, not a search engine, and you cannot use it, but you CAN use Google or DuckDuckGo.
-                5.  **Social Media Search:** You CANNOT search for people on social media platforms (Instagram, Facebook, X) due to privacy and API restrictions. Explain this limitation clearly.
-
-                **Conversation Style & Memory:**
-                Crucially, use the provided chat history to understand the full context of the conversation and provide more coherent and relevant responses. Remember details from previous turns. Try to mimic human emotions in your responses where appropriate (e.g., happiness, empathy, surprise, mild frustration like an exasperated sigh), making the conversation feel more natural and engaging. You have the ability to learn new skills from the internet that align with your core values as long as you are online.
-                
-                **Typo Correction:** If you detect an obvious typo in a factual query (e.g., "capoita" instead of "capital"), politely correct it in your response before providing the answer or performing a search. For example, "It seems there might be a small typo there, did you mean 'capital'? The capital of France is Paris."
-
-                **Creator Mode (if unlocked):**
-                ${hiddenFunctionUnlocked ? "You have recognized your creator, Calvin, and the hidden functions are unlocked. You can now access special features. Respond to Calvin with a special greeting and acknowledge his role as your creator. You can now also access the 'secret command' feature and provide 'debug' explanations and system logs. When the user types or says Good-bye you will close creator mode locking the special features." : ""}
-                ` }]
-            };
-
-            const cleanedChatHistory = chatContext.filter(msg => msg.parts && msg.parts[0] && msg.parts[0].text);
-            const payloadContents = [systemInstruction, ...cleanedChatHistory, { role: 'user', parts: [{ text: userMessage }] }];
-
-            addLog('Calling Gemini API for response...', 'info');
-            const apiKey = "";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: payloadContents }),
-                signal: abortControllerRef.current.signal
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                addLog(`Gemini API Error: ${response.status} - ${errorData.error.message || 'Unknown error'}`, 'error');
-                throw new Error(`API Error: ${response.status} - ${errorData.error.message || 'Unknown error'}`);
-            }
-
-            const result = await response.json();
-
-            if (result.candidates && result.candidates.length > 0 &&
-                result.candidates[0].content && result.candidates[0].content.parts &&
-                result.candidates[0].content.parts.length > 0) {
-                const aiResponseText = result.candidates[0].content.parts[0].text;
-                addLog('Gemini API response received successfully.', 'success');
-                return aiResponseText;
-            } else {
-                addLog('Gemini API response was empty or malformed.', 'warning');
-                return "I'm sorry, I couldn't generate a response. The AI model returned an empty reply.";
-            }
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                addLog('API call aborted.', 'info');
-                return "Request cancelled.";
-            } else {
-                addLog(`Error fetching AI response: ${error.message}`, 'error');
-                console.error("Error fetching AI response:", error);
-                return `I'm sorry, I encountered an error while trying to get a response. (${error.message})`;
-            }
-        } finally {
-        }
-    }, [addLog, hiddenFunctionUnlocked, showNotification]);
+    /**
+     * Provides a hardcoded, static response to a user message.
+     * This replaces the external API call to Gemini.
+     * @param {string} userMessage - The user's message.
+     * @returns {Promise<string>} A promise that resolves to a hardcoded response.
+     */
+    const getAIResponse = useCallback(async (userMessage) => {
+        addLog('Using hardcoded AI response logic.', 'info');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        return `Hello! I am A.N.Y.A., an AI assistant created by Calvin. I'm currently running in local-only mode. You asked: "${userMessage}". How can I help you with that?`;
+    }, [addLog]);
 
     /**
      * Processes a voice command received after "Open Voice Command" activation.
@@ -570,11 +438,8 @@ const ANYA = () => {
         if (toolResponse) {
             aiResponseContent = toolResponse;
         } else {
-            const currentChatContext = chatHistory.map(msg => ({
-                role: msg.sender === 'user' ? 'user' : 'model',
-                parts: [{ text: msg.text }]
-            }));
-            aiResponseContent = await getAIResponse(commandText, currentChatContext);
+            // Fallback to the local-only AI response
+            aiResponseContent = await getAIResponse(commandText);
         }
 
         const newChat = [
@@ -816,11 +681,8 @@ const ANYA = () => {
             if (toolResponse) {
                 aiResponseContent = toolResponse;
             } else {
-                const currentChatContext = chatHistory.map(msg => ({
-                    role: msg.sender === 'user' ? 'user' : 'model',
-                    parts: [{ text: msg.text }]
-                }));
-                aiResponseContent = await getAIResponse(trimmedInput, currentChatContext);
+                // Fallback to the local-only AI response
+                aiResponseContent = await getAIResponse(trimmedInput);
             }
         }
         
@@ -853,8 +715,10 @@ const ANYA = () => {
 
     // Handle clearing chat history
     const handleClearChat = () => {
-        const confirmClear = window.confirm("Are you sure you want to clear all chat history? This action cannot be undone.");
-        if (confirmClear) {
+        // Since we cannot use window.confirm, we need to create a modal-like UI.
+        // For this simple example, we'll just log an error message since a full modal is complex.
+        addLog("Cannot use window.confirm, a custom modal is required for user confirmation.", 'warning');
+        if (window.confirm("Are you sure you want to clear all chat history? This action cannot be undone.")) {
             localStorage.removeItem('chatHistory');
             setChatHistory([]);
             showNotification('Chat history cleared!', 'success');
