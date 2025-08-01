@@ -26,6 +26,8 @@ const ANYA = () => {
     // Gemini API configuration
     const apiKey = ""; // API key is provided by the runtime environment
     const modelName = "gemini-2.5-flash-preview-05-20";
+    const maxRetries = 3;
+    const initialRetryDelay = 1000;
 
     // --- Utility Functions ---
 
@@ -281,50 +283,59 @@ const ANYA = () => {
     // --- Gemini API Function ---
 
     const getAIResponse = useCallback(async (history) => {
-        addLog('Calling Gemini API for response.', 'info');
-        setIsLoading(true);
-        try {
-            const chatHistoryForAPI = history.map(msg => ({
-                role: msg.sender === 'user' ? 'user' : 'model',
-                parts: [{ text: msg.text }]
-            }));
-            
-            const payload = {
-                contents: chatHistoryForAPI,
-                model: modelName,
-            };
+        addLog('Attempting to get response from Gemini API.', 'info');
+        
+        const chatHistoryForAPI = history.map(msg => ({
+            role: msg.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.text }]
+        }));
 
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-            
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+        const payload = {
+            contents: chatHistoryForAPI,
+            model: modelName,
+        };
 
-            const result = await response.json();
-            
-            if (result.candidates && result.candidates.length > 0 &&
-                result.candidates[0].content && result.candidates[0].content.parts &&
-                result.candidates[0].content.parts.length > 0) {
-                const text = result.candidates[0].content.parts[0].text;
-                addLog(`Gemini API responded with: "${text.substring(0, 50)}..."`, 'success');
-                return text;
-            } else {
-                addLog('Gemini API returned an empty or malformed response.', 'error');
-                showNotification('Failed to get a response from the AI.', 'error');
-                return "I'm sorry, I encountered an error while trying to get a response.";
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API call failed with status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    addLog(`Gemini API responded successfully after ${i + 1} attempt(s).`, 'success');
+                    return text;
+                } else {
+                    throw new Error('Malformed response from Gemini API.');
+                }
+            } catch (error) {
+                addLog(`Attempt ${i + 1}/${maxRetries} failed. Error: ${error.message}`, 'error');
+                if (i < maxRetries - 1) {
+                    const delay = initialRetryDelay * Math.pow(2, i);
+                    addLog(`Retrying in ${delay / 1000} seconds...`, 'warning');
+                    await new Promise(res => setTimeout(res, delay));
+                } else {
+                    console.error('Gemini API Error:', error);
+                    addLog('All retry attempts failed. Aborting API call.', 'error');
+                    showNotification('Failed to get a response from the AI after multiple attempts.', 'error');
+                    return "I'm sorry, I encountered a persistent error while trying to get a response.";
+                }
             }
-
-        } catch (error) {
-            addLog(`Error from Gemini API: ${error.message}`, 'error');
-            console.error('Gemini API Error:', error);
-            showNotification('Failed to get a response from the AI. Check your network.', 'error');
-            return "I'm sorry, I encountered an error while trying to get a response.";
-        } finally {
-            setIsLoading(false);
         }
-    }, [addLog, showNotification, apiKey]);
+        return "I'm sorry, I encountered a persistent error while trying to get a response."; // Fallback if all retries fail
+    }, [addLog, showNotification, apiKey, maxRetries, initialRetryDelay]);
     
     // --- Core Logic & Effects ---
 
