@@ -1132,7 +1132,7 @@ const ANYA = () => {
                 {chatHistory.length === 0 ? (
                     <div className="text-center text-gray-500 mt-20">
                        <p className="text-lg">Start a conversation with A.N.Y.A.!</p> 
-                        <p className="text-sm">Creared by Calvin.</p>
+                        <p className="text-sm">Created by Calvin.</p>
                     </div>
                 ) : (
                     chatHistory.map((msg, index) => (
