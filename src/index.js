@@ -1,4 +1,5 @@
 import React from 'react';
+import './index.css';
 import ReactDOM from 'react-dom/client';
 // import './index.css'; // This line is commented out/removed as your app uses Tailwind CSS
 import ANYA from './Anya'; // Import your ANYA component (assuming you renamed App.js to ANYA.js)
