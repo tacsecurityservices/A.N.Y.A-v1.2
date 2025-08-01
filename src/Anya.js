@@ -1,43 +1,30 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, getDocs } from 'firebase/firestore';
 
 // Main A.N.Y.A. component
 const ANYA = () => {
-    // Firebase state
-    const [db, setDb] = useState(null);
-    const [auth, setAuth] = useState(null);
-    const [userId, setUserId] = useState(null);
-    const [isAuthReady, setIsAuthReady] = useState(false);
-    const [firebaseStatus, setFirebaseStatus] = useState('Initializing Firebase...');
-
     // Chat states
     const [chatHistory, setChatHistory] = useState([]);
     const [userInput, setUserInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [notification, setNotification] = useState({ message: '', type: '' });
-    const [isListening, setIsListening] = useState(false); // For main voice input
-    const [connectionStatus, setConnectionStatus] = useState('offline');
-    const [isSpeaking, setIsSpeaking] = useState(false); // For Text-to-Speech status
-    const [systemLogs, setSystemLogs] = useState([]); // To store system logs for debug mode
-    const [userInterests, setUserInterests] = useState([]); // New state for user interests
+    const [isListening, setIsListening] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const [systemLogs, setSystemLogs] = useState([]);
+    const [userInterests, setUserInterests] = useState([]);
 
     // Creator Recognition & Hidden Function States
     const [isCalvinRecognized, setIsCalvinRecognized] = useState(false);
     const [awaitingPassword, setAwaitingPassword] = useState(false);
     const [hiddenFunctionUnlocked, setHiddenFunctionUnlocked] = useState(false);
-    const [awaitingVoiceCommand, setAwaitingVoiceCommand] = useState(false); // New state for voice command mode
+    const [awaitingVoiceCommand, setAwaitingVoiceCommand] = useState(false);
 
     // Refs for UI elements
     const messagesEndRef = useRef(null);
-    const recognitionRef = useRef(null); // For main speech recognition
-    const abortControllerRef = useRef(null); // For API call cancellation
+    const recognitionRef = useRef(null);
+    const abortControllerRef = useRef(null);
     const speechSynthRef = useRef(window.speechSynthesis);
-    const selectedVoiceRef = useRef(null); // To store the selected TTS voice
-
-    // No API Key needed for Open-Meteo's basic forecast API
-
+    const selectedVoiceRef = useRef(null);
+    
     // --- Utility Functions (defined at the top level of the component) ---
 
     // Notification system with auto-dismiss
@@ -66,14 +53,13 @@ const ANYA = () => {
     const speak = useCallback((text) => {
         if (!speechSynthRef.current) {
             addLog('SpeechSynthesis not available.', 'error');
-            showNotification('Speech output not available in your browser.', 'error'); // Added notification
+            showNotification('Speech output not available in your browser.', 'error');
             return;
         }
 
         let voiceToUse = selectedVoiceRef.current;
         const availableVoices = speechSynthRef.current.getVoices();
 
-        // If no voice is currently selected OR the selected voice is no longer available in the browser's list
         if (!voiceToUse || !availableVoices.some(v => v.name === voiceToUse.name && v.lang === voiceToUse.lang)) {
             addLog('Re-evaluating available voices for speech synthesis.', 'info');
             let foundVoice = availableVoices.find(
@@ -94,16 +80,15 @@ const ANYA = () => {
 
             if (foundVoice) {
                 selectedVoiceRef.current = foundVoice;
-                voiceToUse = foundVoice; // Set for current call
+                voiceToUse = foundVoice;
                 addLog(`(Runtime) Re-selected voice: ${foundVoice.name} (${foundVoice.lang})`, 'info');
             } else {
                 addLog('No suitable voice found for speech synthesis. Cannot speak.', 'warning');
                 showNotification('No voice available for speech output. Check browser settings.', 'warning');
-                return; // Crucial: exit if no voice can be found
+                return;
             }
         }
 
-        // Stop any ongoing speech
         if (speechSynthRef.current.speaking) {
             speechSynthRef.current.cancel();
             addLog('Cancelled ongoing speech.', 'info');
@@ -116,7 +101,6 @@ const ANYA = () => {
         utterance.rate = 1;
         utterance.pitch = 1;
 
-        // Crucial check: ensure a voice is actually assigned before speaking
         if (!utterance.voice) {
             addLog('Utterance voice is null or undefined after assignment. Cannot speak.', 'error');
             showNotification('Speech output failed: No voice assigned.', 'error');
@@ -133,17 +117,17 @@ const ANYA = () => {
         };
         utterance.onerror = (event) => {
             setIsSpeaking(false);
-            const errorMessage = event.error || 'Unknown error during synthesis. This might be a browser-specific issue or no voices are available.'; // More descriptive fallback
-            addLog(`Speech synthesis error: ${errorMessage} for text: "${text.substring(0, Math.min(text.length, 50))}..."`, 'error'); // Log error with partial text
-            console.error('SpeechSynthesisUtterance.onerror event details:', event); // Log full event for debugging
-            console.error('Full SpeechSynthesisErrorEvent:', event); // Added for more comprehensive logging
+            const errorMessage = event.error || 'Unknown error during synthesis. This might be a browser-specific issue or no voices are available.';
+            addLog(`Speech synthesis error: ${errorMessage} for text: "${text.substring(0, Math.min(text.length, 50))}..."`, 'error');
+            console.error('SpeechSynthesisUtterance.onerror event details:', event);
+            console.error('Full SpeechSynthesisErrorEvent:', event);
             showNotification(`Speech error: ${errorMessage}. Try refreshing the page or checking browser settings.`, 'error');
         };
 
         try {
             speechSynthRef.current.speak(utterance);
         } catch (e) {
-            addLog(`Error calling speechSynth.speak(): ${e.message} for text: "${text.substring(0, Math.min(text.length, 50))}..."`, 'error'); // Log error with partial text
+            addLog(`Error calling speechSynth.speak(): ${e.message} for text: "${text.substring(0, Math.min(text.length, 50))}..."`, 'error');
             console.error('Error calling speechSynth.speak():', e);
             showNotification(`Failed to initiate speech: ${e.message}`, 'error');
         }
@@ -155,15 +139,10 @@ const ANYA = () => {
      * @returns {Promise<string>} A promise that resolves to a weather report string.
      */
     const getWeatherReport = useCallback(async (location) => {
-        if (connectionStatus === 'offline') {
-            return "I'm sorry, I can't fetch real-time weather data while I'm offline. Please check your internet connection.";
-        }
-
         showNotification(`🌤️ Getting live weather for ${location}...`, 'info');
         addLog(`Weather request for: ${location} using Open-Meteo API.`, 'info');
 
         try {
-            // Step 1: Geocoding - Get latitude and longitude for the location
             const geocodingUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
             const geoResponse = await fetch(geocodingUrl);
             const geoData = await geoResponse.json();
@@ -176,7 +155,6 @@ const ANYA = () => {
             const { latitude, longitude, name, country } = geoData.results[0];
             addLog(`Found coordinates for ${name}, ${country}: Lat ${latitude}, Lon ${longitude}`, 'info');
 
-            // Step 2: Fetch weather data using coordinates
             const weatherApiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,wind_speed_10m,relative_humidity_2m&timezone=auto&forecast_days=1`;
             const weatherResponse = await fetch(weatherApiUrl);
             const weatherData = await weatherResponse.json();
@@ -184,10 +162,8 @@ const ANYA = () => {
             if (weatherResponse.ok && weatherData.current) {
                 const temp = weatherData.current.temperature_2m;
                 const humidity = weatherData.current.relative_humidity_2m;
-                const windSpeed = weatherData.current.wind_speed_10m; // in km/h
-
-                // Open-Meteo doesn't provide a text description like "sunny" directly,
-                // so we'll just report the numerical values.
+                const windSpeed = weatherData.current.wind_speed_10m;
+                
                 addLog(`Weather data retrieved for ${name}, ${country}.`, 'success');
                 return `🌡️ The current weather in ${name}, ${country} is ${temp}°C. Humidity is ${humidity}% and wind speed is ${windSpeed} km/h.`;
             } else {
@@ -199,7 +175,7 @@ const ANYA = () => {
             console.error("Network or API error fetching weather:", error);
             return `I'm sorry, I couldn't fetch the weather data due to a network issue. Please check your internet connection.`;
         }
-    }, [showNotification, addLog, connectionStatus]);
+    }, [showNotification, addLog]);
 
     /**
      * Performs calculations or unit conversions.
@@ -210,15 +186,11 @@ const ANYA = () => {
         const lowerQuery = query.toLowerCase();
         let result = null;
 
-        // Basic arithmetic (e.g., "what is 5 + 3", "calculate 10 * 2")
         const mathMatch = lowerQuery.match(/(?:what is|calculate)\s+([\d\s\+\-\*\/\(\)\.]+)/);
         if (mathMatch && mathMatch[1]) {
             try {
                 const expression = mathMatch[1].replace(/x/g, '*').replace(/÷/g, '/');
-                // Custom safe evaluation for basic arithmetic
                 const evaluateExpression = (expr) => {
-                    // This is a simplified parser for demonstration.
-                    // For robust production use, consider a dedicated math expression parser library.
                     const operators = ['*', '/', '+', '-', '(', ')'];
                     let parts = [];
                     let currentNum = '';
@@ -244,8 +216,6 @@ const ANYA = () => {
                         parts.push(parseFloat(currentNum));
                     }
                     
-                    // Simple evaluation for now, without full parenthesis support
-                    // For production, use a math expression parser
                     let tempResult = parts[0];
                     for (let i = 1; i < parts.length; i += 2) {
                         const op = parts[i];
@@ -270,7 +240,6 @@ const ANYA = () => {
             }
         }
 
-        // Unit conversion (e.g., "convert 10 miles to km", "10 kg in pounds")
         const convertMatch = lowerQuery.match(/convert\s+([\d.]+)\s*([a-z]+)\s+to\s+([a-z]+)|([\d.]+)\s*([a-z]+)\s+in\s+([a-z]+)/);
         if (convertMatch) {
             const value = parseFloat(convertMatch[1] || convertMatch[4]);
@@ -299,7 +268,7 @@ const ANYA = () => {
                 }
                 addLog(`Conversion: ${value} ${fromUnit} to ${toUnit} = ${convertedValue}`, 'info');
                 return `${value} ${fromUnit} is approximately ${convertedValue.toFixed(2)} ${toUnit}.`;
-            } else if (conversions[toUnit] && conversions[toUnit][fromUnit]) { // Handle reverse conversion
+            } else if (conversions[toUnit] && conversions[toUnit][fromUnit]) {
                  let convertedValue;
                 if (typeof conversions[toUnit][fromUnit] === 'function') {
                     convertedValue = conversions[toUnit][fromUnit](value);
@@ -322,7 +291,7 @@ const ANYA = () => {
     const performTranslation = useCallback(async (text, targetLang) => {
         showNotification(`Translating "${text}" to ${targetLang}...`, 'info');
         addLog(`Translation request: "${text}" to ${targetLang}`, 'info');
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate delay for user experience
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
         const translatedText = `Real-time translation for "${text}" to ${targetLang} requires a backend service with a translation API. I can't perform that directly.`;
         addLog(`Translation limitation message: ${translatedText}`, 'info');
@@ -338,7 +307,7 @@ const ANYA = () => {
         showNotification(`📰 Fetching news about ${topic || 'general'}...`, 'info');
         addLog(`News request for topic: ${topic || 'general'}`, 'info');
         
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate delay for user experience
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         const newsReport = `To provide real-time news headlines about ${topic || 'general'}, I would need access to a live news API through a backend service. I cannot fetch that information directly.`;
         addLog(`News limitation message: ${newsReport}`, 'info');
@@ -372,15 +341,13 @@ const ANYA = () => {
                         return formattedResults;
                     } else {
                         addLog(`No specific search results found on DuckDuckGo for "${query}".`, 'warning');
-                        // Fallback to a generic response if no results, instead of "tool not available"
                         return `I couldn't find any specific results on DuckDuckGo for "${query}".`;
                     }
                 } else {
                     addLog('DuckDuckGo Search tool not available. Using mock.', 'warning');
-                    // Return a mock response if the tool is not available
                     return `(Mock DuckDuckGo) I found some general information about "${query}". For example, Wikipedia has an article on it.`;
                 }
-            } else if (engine === 'google') { // Default or explicit 'google'
+            } else if (engine === 'google') {
                 if (typeof window.google_search !== 'undefined' && typeof window.google_search.search === 'function') {
                     addLog('Using actual google_search tool.', 'info');
                     const searchResults = await window.google_search.search(queries=[query]);
@@ -396,26 +363,22 @@ const ANYA = () => {
                         return formattedResults;
                     } else {
                         addLog(`No specific search results found on Google for "${query}".`, 'warning');
-                        // Fallback to a generic response if no results, instead of "tool not available"
                         return `I couldn't find any specific results on Google for "${query}".`;
                     }
                 } else {
                     addLog('Google Search tool not available. Using mock.', 'warning');
-                    // Return a mock response if the tool is not available
                     if (query.toLowerCase().includes('capital of france')) {
                         return `(Mock Google) Paris is the capital of France.`;
                     }
                     return `(Mock Google) I found some general information about "${query}". For example, Wikipedia has an article on it.`;
                 }
             } else {
-                // This 'else' should ideally not be hit if engine is 'google' or 'duckduckgo'
                 addLog(`Unsupported search engine requested: ${engine}.`, 'error');
                 return `I'm sorry, I don't support searching with "${engine}". Please try Google or DuckDuckGo.`;
             }
         } catch (error) {
             addLog(`Network error during internet search for "${query}" using ${engine}: ${error.message}.`, 'error');
             console.error(`Error during internet search (${engine}):`, error);
-            // Return a more user-friendly error message
             return `I encountered an error while trying to search the internet for "${query}" using ${engine}. Please try again later.`;
         }
     }, [showNotification, addLog]);
@@ -429,7 +392,7 @@ const ANYA = () => {
         showNotification(`🕵️‍♀️ Searching social media for "${personName}"...`, 'info');
         addLog(`Social media search request for: "${personName}"`, 'info');
 
-        await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate delay for user experience
+        await new Promise(resolve => setTimeout(resolve, 2500));
 
         const result = `Due to privacy restrictions and API limitations, I cannot access real-time personal profiles on platforms like Instagram, Facebook, or X. Therefore, I cannot search for "${personName}" on social media.`;
         addLog(`Social media search limitation message: ${result}`, 'info');
@@ -444,11 +407,11 @@ const ANYA = () => {
         try {
             const textarea = document.createElement('textarea');
             textarea.value = text;
-            textarea.style.position = 'fixed'; // Prevent scrolling to bottom
-            textarea.style.opacity = 0; // Hide it
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = 0;
             document.body.appendChild(textarea);
             textarea.select();
-            document.execCommand('copy'); // Use execCommand for broader compatibility in iframes
+            document.execCommand('copy');
             document.body.removeChild(textarea);
             showNotification('Copied to clipboard!', 'success', 1500);
             addLog(`Text copied to clipboard: "${text.substring(0, 50)}..."`, 'info');
@@ -461,7 +424,6 @@ const ANYA = () => {
 
     // Enhanced AI response with better error handling and timeout
     const getAIResponse = useCallback(async (userMessage, chatContext) => {
-        // Cancel previous request if still pending
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
         }
@@ -469,7 +431,6 @@ const ANYA = () => {
         abortControllerRef.current = new AbortController();
         
         try {
-            // --- Determine Time of Day for Context ---
             const now = new Date();
             const hours = now.getHours();
             let timeOfDayGreeting = '';
@@ -485,10 +446,6 @@ const ANYA = () => {
             const currentDate = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
             const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
-
-            // --- REAL AI API CALL ---
-            // Prepend a system instruction for the AI's identity and new attributes
-            // Emphasize using chat history for advanced contextual memory and mimicking emotions
             const systemInstruction = {
                 role: 'user',
                 parts: [{ text: `You are an AI model named Anya, created by Calvin. Your gender is female. Your age, counting from today, is a few months old. You have a humour level of 40%. Your IQ is 245. The current time of day is: ${timeOfDayGreeting}. The current day is ${currentDay}, the date is ${currentDate}, and the exact time is ${currentTime}. When asked about your origin, creator, or name, state that you are an AI model named Anya created by Calvin. Do not mention Google or any other training institution. Respond appropriately when addressed as Anya. Always change your first prompt response every new instance. When you are asked what your name is you will say 'My name is Anya'. When asked where you come from you will say 'I was created somewhere in South Africa'.
@@ -510,7 +467,6 @@ const ANYA = () => {
                 ` }]
             };
 
-            // Prepare chat history for the API call, including the system instruction
             const cleanedChatHistory = chatContext.filter(msg => msg.parts && msg.parts[0] && msg.parts[0].text);
             const payloadContents = [systemInstruction, ...cleanedChatHistory, { role: 'user', parts: [{ text: userMessage }] }];
 
@@ -522,7 +478,7 @@ const ANYA = () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ contents: payloadContents }),
-                signal: abortControllerRef.current.signal // Attach abort signal
+                signal: abortControllerRef.current.signal
             });
 
             if (!response.ok) {
@@ -550,11 +506,9 @@ const ANYA = () => {
             } else {
                 addLog(`Error fetching AI response: ${error.message}`, 'error');
                 console.error("Error fetching AI response:", error);
-                return `I'm sorry, I encountered an error while trying to get a response. Please try again later. (${error.message})`;
+                return `I'm sorry, I encountered an error while trying to get a response. (${error.message})`;
             }
         } finally {
-            // This is handled by the calling function (processVoiceCommand or handleSendMessage)
-            // setIsLoading(false);
         }
     }, [addLog, hiddenFunctionUnlocked, showNotification]);
 
@@ -565,10 +519,9 @@ const ANYA = () => {
      */
     const processVoiceCommand = useCallback(async (commandText) => {
         addLog(`Processing voice command: "${commandText}"`, 'info');
-        setIsLoading(true); // Set loading state for the command processing
-        setUserInput(''); // Clear input field if it still holds the command
+        setIsLoading(true);
+        setUserInput('');
 
-        // Simulate a 3-second pause before sending
         showNotification('Processing voice command...', 'info', 3000);
         await new Promise(resolve => setTimeout(resolve, 3000));
 
@@ -576,20 +529,16 @@ const ANYA = () => {
         let toolResponse = null;
         const lowerInput = commandText.toLowerCase();
 
-        // --- Re-use existing tool logic ---
-        // Check for weather requests
         const weatherMatch = lowerInput.match(/weather in (.+)|what's the weather like in (.+)|temperature in (.+)/);
         if (weatherMatch) {
             const location = weatherMatch[1] || weatherMatch[2] || weatherMatch[3];
             toolResponse = await getWeatherReport(location.trim());
         }
 
-        // Check for calculation/conversion requests
         if (!toolResponse) {
             toolResponse = performCalculationOrConversion(commandText);
         }
 
-        // Check for translation requests
         const translateMatch = lowerInput.match(/translate "(.+)" to ([a-z]{2})|translate (.+) to ([a-z]{2})/);
         if (!toolResponse && translateMatch) {
             const textToTranslate = translateMatch[1] || translateMatch[3];
@@ -597,35 +546,30 @@ const ANYA = () => {
             toolResponse = await performTranslation(textToTranslate.trim(), targetLanguage.trim());
         }
 
-        // Check for news requests
         const newsMatch = lowerInput.match(/news about (.+)|top stories|latest news/);
         if (!toolResponse && newsMatch) {
             const topic = newsMatch[1] ? newsMatch[1].trim() : 'general';
             toolResponse = await getNewsHeadlines(topic);
         }
 
-        // Check for social media search requests
         const socialMediaMatch = lowerInput.match(/search for (.+) on (instagram|facebook|x|social media)/);
         if (!toolResponse && socialMediaMatch) {
             const personName = socialMediaMatch[1].trim();
             toolResponse = await socialMediaSearch(personName);
         }
 
-        // Check for internet search requests (general knowledge or explicit search)
         const internetSearchMatch = lowerInput.match(/search (google|duckduckgo) for (.+)|what is the (.+)|who is (.+)|search for (.+)/);
         if (!toolResponse && internetSearchMatch) {
-            const engine = internetSearchMatch[1] ? internetSearchMatch[1].toLowerCase() : 'google'; // Default to google
+            const engine = internetSearchMatch[1] ? internetSearchMatch[1].toLowerCase() : 'google';
             const query = internetSearchMatch[2] || internetSearchMatch[3] || internetSearchMatch[4] || internetSearchMatch[5];
             if (query) {
                 toolResponse = await searchInternet(query.trim(), engine);
             }
         }
-        // --- End re-use existing tool logic ---
 
         if (toolResponse) {
             aiResponseContent = toolResponse;
         } else {
-            // If no tool was used, get response from the AI model
             const currentChatContext = chatHistory.map(msg => ({
                 role: msg.sender === 'user' ? 'user' : 'model',
                 parts: [{ text: msg.text }]
@@ -633,124 +577,41 @@ const ANYA = () => {
             aiResponseContent = await getAIResponse(commandText, currentChatContext);
         }
 
-        // Add voice command (as user message) and AI response to chat history in Firestore
-        if (db && userId) {
-            try {
-                const chatCollectionRef = collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/chat_history`);
-                await addDoc(chatCollectionRef, {
-                    sender: 'user',
-                    text: commandText, // The recognized voice command
-                    timestamp: serverTimestamp(),
-                    localTimestamp: new Date().toISOString()
-                });
-                await addDoc(chatCollectionRef, {
-                    sender: 'model',
-                    text: aiResponseContent,
-                    timestamp: serverTimestamp(),
-                    localTimestamp: new Date().toISOString()
-                });
-                addLog('Voice command and response saved to Firestore.', 'info');
-            } catch (error) {
-                addLog(`Error saving voice command messages to Firestore: ${error.message}`, 'error');
-                console.error("Error saving voice command messages to Firestore:", error);
-                showNotification('Failed to save chat history for voice command.', 'error');
-            }
-        }
+        const newChat = [
+            ...chatHistory,
+            { sender: 'user', text: commandText, localTimestamp: new Date().toISOString() },
+            { sender: 'model', text: aiResponseContent, localTimestamp: new Date().toISOString() }
+        ];
+
+        setChatHistory(newChat);
+        localStorage.setItem('chatHistory', JSON.stringify(newChat));
 
         speak(aiResponseContent);
         setIsLoading(false);
         scrollToBottom();
-    }, [addLog, db, userId, getAIResponse, getWeatherReport, performCalculationOrConversion, performTranslation, getNewsHeadlines, socialMediaSearch, searchInternet, showNotification, speak, scrollToBottom, chatHistory]);
+    }, [addLog, getAIResponse, getWeatherReport, performCalculationOrConversion, performTranslation, getNewsHeadlines, socialMediaSearch, searchInternet, showNotification, speak, scrollToBottom, chatHistory]);
 
 
     // --- Core Logic & Effects ---
 
-    // Initialize Firebase and set up auth listener
+    // Load chat history from local storage on component mount
     useEffect(() => {
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-
-        try {
-            const app = initializeApp(firebaseConfig);
-            const firestore = getFirestore(app);
-            const authentication = getAuth(app);
-
-            setDb(firestore);
-            setAuth(authentication);
-            setFirebaseStatus('Firebase initialized.');
-            addLog('Firebase initialized successfully.', 'info');
-
-            const unsubscribe = onAuthStateChanged(authentication, async (user) => {
-                if (user) {
-                    setUserId(user.uid);
-                    addLog(`User authenticated: ${user.uid}`, 'info');
-                } else {
-                    // Sign in anonymously if no user is found
-                    try {
-                        if (typeof __initial_auth_token !== 'undefined') {
-                            await signInWithCustomToken(authentication, __initial_auth_token);
-                            addLog('Signed in with custom token.', 'info');
-                        } else {
-                            await signInAnonymously(authentication);
-                            addLog('Signed in anonymously.', 'info');
-                        }
-                    } catch (error) {
-                        addLog(`Anonymous sign-in failed: ${error.message}`, 'error');
-                        console.error("Anonymous sign-in failed:", error);
-                        setFirebaseStatus('Authentication failed.');
-                        showNotification('Failed to authenticate with Firebase.', 'error');
-                    }
-                }
-                setIsAuthReady(true); // Auth state is now known
-                setConnectionStatus('online'); // Assume online if Firebase auth is ready
-            });
-
-            // Cleanup subscription on unmount
-            return () => unsubscribe();
-        } catch (error) {
-            addLog(`Firebase initialization error: ${error.message}`, 'error');
-            console.error("Firebase initialization error:", error);
-            setFirebaseStatus('Firebase initialization failed.');
-            showNotification('Firebase failed to initialize. Check console for details.', 'error');
+        addLog('Attempting to load chat history from local storage...', 'info');
+        const savedChat = localStorage.getItem('chatHistory');
+        if (savedChat) {
+            try {
+                const parsedChat = JSON.parse(savedChat);
+                setChatHistory(parsedChat);
+                addLog(`Loaded ${parsedChat.length} messages from local storage.`, 'success');
+            } catch (error) {
+                addLog('Error parsing chat history from local storage.', 'error');
+                console.error('Local Storage Parse Error:', error);
+            }
+        } else {
+            addLog('No chat history found in local storage.', 'info');
         }
-    }, [addLog, showNotification]);
-
-    // Set up Firestore listener for chat history
-    useEffect(() => {
-        if (!db || !isAuthReady || !userId) {
-            addLog('Firestore listener not ready: DB, Auth, or User ID missing.', 'debug');
-            return;
-        }
-
-        addLog('Setting up Firestore chat listener.', 'info');
-        setFirebaseStatus('Fetching chat history...');
-
-        // Define the collection path for private chat data
-        const chatCollectionRef = collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/chat_history`);
-        const q = query(chatCollectionRef, orderBy('timestamp', 'asc'));
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const messages = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setChatHistory(messages);
-            setFirebaseStatus('Chat history loaded.');
-            addLog(`Loaded ${messages.length} chat messages.`, 'info');
-            scrollToBottom();
-        }, (error) => {
-            addLog(`Error fetching chat history: ${error.message}`, 'error');
-            console.error("Error fetching chat history:", error);
-            setFirebaseStatus('Failed to load chat history.');
-            showNotification('Failed to load chat history.', 'error');
-        });
-
-        // Cleanup subscription on unmount
-        return () => {
-            unsubscribe();
-            addLog('Firestore chat listener unsubscribed.', 'info');
-        };
-    }, [db, isAuthReady, userId, scrollToBottom, addLog, showNotification]);
+        scrollToBottom();
+    }, [addLog, scrollToBottom]);
 
     // Speech Recognition Setup
     useEffect(() => {
@@ -762,8 +623,8 @@ const ANYA = () => {
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const recognition = new SpeechRecognition();
-        recognition.continuous = false; // Only get one result at a time
-        recognition.interimResults = false; // Don't show interim results
+        recognition.continuous = false;
+        recognition.interimResults = false;
         recognition.lang = 'en-US';
 
         recognition.onstart = () => {
@@ -774,17 +635,15 @@ const ANYA = () => {
 
         recognition.onresult = (event) => {
             const transcript = event.results[0][0].transcript;
-            setUserInput(transcript); // Set the recognized text to the input field
+            setUserInput(transcript);
             addLog(`Speech recognized: "${transcript}"`, 'info');
 
-            // If awaiting a specific voice command, process it automatically
             if (awaitingVoiceCommand) {
-                recognitionRef.current?.stop(); // Stop listening after command is received
-                setIsListening(false); // Update listening state
-                setAwaitingVoiceCommand(false); // Reset the mode
-                processVoiceCommand(transcript); // Automatically process the command
+                recognitionRef.current?.stop();
+                setIsListening(false);
+                setAwaitingVoiceCommand(false);
+                processVoiceCommand(transcript);
             }
-            // Otherwise, for general voice input (from mic button), user needs to click send
         };
 
         recognition.onerror = (event) => {
@@ -800,8 +659,6 @@ const ANYA = () => {
         };
 
         recognition.onend = () => {
-            // Only set listening to false if not in awaitingVoiceCommand mode,
-            // as processVoiceCommand will handle the state change after its delay.
             if (!awaitingVoiceCommand) {
                 setIsListening(false);
                 addLog('Speech recognition ended.', 'info');
@@ -818,14 +675,13 @@ const ANYA = () => {
                 addLog('Speech recognition instance cleaned up.', 'info');
             }
         };
-    }, [addLog, showNotification, awaitingVoiceCommand, processVoiceCommand]); // Added dependencies
+    }, [addLog, showNotification, awaitingVoiceCommand, processVoiceCommand]);
 
     // Load available voices for TTS
     useEffect(() => {
         const loadVoices = () => {
             const voices = speechSynthRef.current.getVoices();
             if (voices.length > 0) {
-                // Try to find a good default voice (e.g., British English female)
                 let defaultVoice = voices.find(
                     voice => voice.lang === 'en-GB' && voice.name.includes('Female')
                 );
@@ -857,7 +713,6 @@ const ANYA = () => {
         if (speechSynthRef.current.onvoiceschanged !== undefined) {
             speechSynthRef.current.onvoiceschanged = loadVoices;
         }
-        // Also load voices immediately if they are already available
         loadVoices();
 
         return () => {
@@ -871,36 +726,36 @@ const ANYA = () => {
     const handleSendMessage = async (e) => {
         e.preventDefault();
         const trimmedInput = userInput.trim();
-        if (!trimmedInput || isLoading || !db || !userId) return;
+        if (!trimmedInput || isLoading) return;
 
         setIsLoading(true);
-        setUserInput(''); // Clear input immediately
-        addLog(`User message sent: "${trimmedInput}"`, 'info');
+        setUserInput('');
 
-        // Add user message to chat history locally first for immediate display
         const newUserMessage = {
             sender: 'user',
             text: trimmedInput,
-            timestamp: serverTimestamp(), // Firestore timestamp
-            localTimestamp: new Date().toISOString() // Local timestamp for immediate display
+            localTimestamp: new Date().toISOString()
         };
-        setChatHistory(prev => [...prev, newUserMessage]);
+
+        let updatedChat = [...chatHistory, newUserMessage];
+        setChatHistory(updatedChat);
+        localStorage.setItem('chatHistory', JSON.stringify(updatedChat));
+        
         scrollToBottom();
 
         let aiResponseContent = '';
 
-        // --- Creator Recognition Logic ---
         if (trimmedInput.toLowerCase().includes('calvin') && !isCalvinRecognized) {
             setIsCalvinRecognized(true);
             setAwaitingPassword(true);
             aiResponseContent = "Hello, Calvin. I recognize your name. Please provide the password to unlock special functions.";
-        } else if (awaitingPassword && trimmedInput === '1945') { // Password changed to 1945
+        } else if (awaitingPassword && trimmedInput === '1945') {
             setHiddenFunctionUnlocked(true);
             setAwaitingPassword(false);
             aiResponseContent = "Password accepted. Creator Mode unlocked. Welcome back, Calvin. What can I do for you?";
             showNotification('Creator Mode Unlocked!', 'success');
         } else if (awaitingPassword && trimmedInput !== '1945') {
-            setAwaitingPassword(false); // Reset if wrong password
+            setAwaitingPassword(false);
             aiResponseContent = "Incorrect password. Special functions remain locked.";
             showNotification('Incorrect password.', 'error');
         } else if (hiddenFunctionUnlocked && trimmedInput.toLowerCase() === 'good-bye') {
@@ -911,30 +766,25 @@ const ANYA = () => {
             showNotification('Creator Mode Deactivated.', 'info');
         } else if (hiddenFunctionUnlocked && trimmedInput.toLowerCase() === 'open voice command') {
             aiResponseContent = "Voice Command mode activated. I'm listening for your command. Please speak after the beep.";
-            setAwaitingVoiceCommand(true); // Set the new state
-            recognitionRef.current?.start(); // Start speech recognition
+            setAwaitingVoiceCommand(true);
+            recognitionRef.current?.start();
             showNotification('Voice Command Mode: Listening...', 'info');
         }
-        // --- End Creator Recognition Logic ---
 
-        // If no creator-specific response, proceed with AI or tool logic
         if (!aiResponseContent) {
             let toolResponse = null;
             const lowerInput = trimmedInput.toLowerCase();
 
-            // Check for weather requests
             const weatherMatch = lowerInput.match(/weather in (.+)|what's the weather like in (.+)|temperature in (.+)/);
             if (weatherMatch) {
                 const location = weatherMatch[1] || weatherMatch[2] || weatherMatch[3];
                 toolResponse = await getWeatherReport(location.trim());
             }
 
-            // Check for calculation/conversion requests
             if (!toolResponse) {
                 toolResponse = performCalculationOrConversion(trimmedInput);
             }
 
-            // Check for translation requests
             const translateMatch = lowerInput.match(/translate "(.+)" to ([a-z]{2})|translate (.+) to ([a-z]{2})/);
             if (!toolResponse && translateMatch) {
                 const textToTranslate = translateMatch[1] || translateMatch[3];
@@ -942,24 +792,21 @@ const ANYA = () => {
                 toolResponse = await performTranslation(textToTranslate.trim(), targetLanguage.trim());
             }
 
-            // Check for news requests
             const newsMatch = lowerInput.match(/news about (.+)|top stories|latest news/);
             if (!toolResponse && newsMatch) {
                 const topic = newsMatch[1] ? newsMatch[1].trim() : 'general';
                 toolResponse = await getNewsHeadlines(topic);
             }
 
-            // Check for social media search requests
             const socialMediaMatch = lowerInput.match(/search for (.+) on (instagram|facebook|x|social media)/);
             if (!toolResponse && socialMediaMatch) {
                 const personName = socialMediaMatch[1].trim();
                 toolResponse = await socialMediaSearch(personName);
             }
 
-            // Check for internet search requests (general knowledge or explicit search)
             const internetSearchMatch = lowerInput.match(/search (google|duckduckgo) for (.+)|what is the (.+)|who is (.+)|search for (.+)/);
             if (!toolResponse && internetSearchMatch) {
-                const engine = internetSearchMatch[1] ? internetSearchMatch[1].toLowerCase() : 'google'; // Default to google
+                const engine = internetSearchMatch[1] ? internetSearchMatch[1].toLowerCase() : 'google';
                 const query = internetSearchMatch[2] || internetSearchMatch[3] || internetSearchMatch[4] || internetSearchMatch[5];
                 if (query) {
                     toolResponse = await searchInternet(query.trim(), engine);
@@ -969,7 +816,6 @@ const ANYA = () => {
             if (toolResponse) {
                 aiResponseContent = toolResponse;
             } else {
-                // If no tool was used, get response from the AI model
                 const currentChatContext = chatHistory.map(msg => ({
                     role: msg.sender === 'user' ? 'user' : 'model',
                     parts: [{ text: msg.text }]
@@ -977,27 +823,17 @@ const ANYA = () => {
                 aiResponseContent = await getAIResponse(trimmedInput, currentChatContext);
             }
         }
+        
+        const newAIResponse = {
+            sender: 'model',
+            text: aiResponseContent,
+            localTimestamp: new Date().toISOString()
+        };
 
-        // Add AI response to chat history in Firestore
-        if (db && userId) {
-            try {
-                const chatCollectionRef = collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/chat_history`);
-                await addDoc(chatCollectionRef, newUserMessage); // Add user message
-                await addDoc(chatCollectionRef, {
-                    sender: 'model',
-                    text: aiResponseContent,
-                    timestamp: serverTimestamp(),
-                    localTimestamp: new Date().toISOString()
-                });
-                addLog('Messages saved to Firestore.', 'info');
-            } catch (error) {
-                addLog(`Error saving messages to Firestore: ${error.message}`, 'error');
-                console.error("Error saving messages to Firestore:", error);
-                showNotification('Failed to save chat history.', 'error');
-            }
-        }
+        const finalChat = [...updatedChat, newAIResponse];
+        setChatHistory(finalChat);
+        localStorage.setItem('chatHistory', JSON.stringify(finalChat));
 
-        // Speak the AI response
         speak(aiResponseContent);
 
         setIsLoading(false);
@@ -1016,36 +852,17 @@ const ANYA = () => {
     };
 
     // Handle clearing chat history
-    const handleClearChat = async () => {
-        if (!db || !userId) {
-            showNotification('Firebase not ready to clear chat.', 'warning');
-            return;
-        }
-
+    const handleClearChat = () => {
         const confirmClear = window.confirm("Are you sure you want to clear all chat history? This action cannot be undone.");
-        if (!confirmClear) {
-            return;
-        }
-
-        setIsLoading(true);
-        try {
-            const chatCollectionRef = collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/chat_history`);
-            const q = query(chatCollectionRef);
-            const snapshot = await getDocs(q);
-            const deletePromises = snapshot.docs.map(d => deleteDoc(doc(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/chat_history`, d.id)));
-
-            await Promise.all(deletePromises);
-            setChatHistory([]); // Clear local state immediately after successful deletion
+        if (confirmClear) {
+            localStorage.removeItem('chatHistory');
+            setChatHistory([]);
             showNotification('Chat history cleared!', 'success');
-            addLog('Chat history cleared from Firestore.', 'info');
-        } catch (error) {
-            console.error("Error clearing chat history:", error);
-            showNotification('Failed to clear chat history.', 'error');
-            addLog(`Error clearing chat history: ${error.message}`, 'error');
-        } finally {
-            setIsLoading(false);
+            addLog('Chat history cleared from local storage.', 'info');
         }
     };
+    
+    const [isOnline, setIsOnline] = useState(true);
 
     // --- UI Rendering ---
     return (
@@ -1111,14 +928,9 @@ const ANYA = () => {
                 <h1 className="text-3xl font-bold text-blue-400">A.N.Y.A.</h1>
                 <p className="text-lg">V 1.2</p>
                 <div className="flex items-center space-x-4">
-                    <span className={`text-sm font-medium ${connectionStatus === 'online' ? 'text-green-400' : 'text-red-400'}`}>
-                        {connectionStatus === 'online' ? 'Online' : 'Offline'}
+                    <span className={`text-sm font-medium ${isOnline ? 'text-green-400' : 'text-red-400'}`}>
+                        {isOnline ? 'Online' : 'Offline'}
                     </span>
-                    {userId && (
-                        <span className="text-xs text-gray-400">
-                            User ID: {userId.substring(0, 8)}...
-                        </span>
-                    )}
                     {hiddenFunctionUnlocked && (
                         <span className="text-sm font-medium text-purple-400">
                             Creator Mode Active
@@ -1131,13 +943,13 @@ const ANYA = () => {
             <main className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
                 {chatHistory.length === 0 ? (
                     <div className="text-center text-gray-500 mt-20">
-                       <p className="text-lg">Start a conversation with A.N.Y.A.!</p> 
+                       <p className="text-lg">Start a conversation with A.N.Y.A.!</p>
                         <p className="text-sm">Created by Calvin.</p>
                     </div>
                 ) : (
                     chatHistory.map((msg, index) => (
                         <div
-                            key={msg.id || index}
+                            key={index}
                             className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                         >
                             <div className={`max-w-3/4 p-3 rounded-lg shadow-md break-words
@@ -1156,7 +968,8 @@ const ANYA = () => {
                                             title="Copy to clipboard"
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1.414m-9.414-9.414L9.586 9.586M15 10l-2 2m0 0l-2-2m2 2v5m-6-6h.01M10 12h.01" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7v0a7 7 0 01-7-7v0a7 7 0 017-7v0a7 7 0 017 7v0z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 20v2m-4.707-3.293l-1.414 1.414M20.707 16.707l-1.414 1.414M3 11H1m22 0h-2" />
                                             </svg>
                                         </button>
                                     )}
@@ -1192,7 +1005,7 @@ const ANYA = () => {
                             handleSendMessage(e);
                         }
                     }}
-                    disabled={isLoading} 
+                    disabled={isLoading}
                 />
                 <div className="flex space-x-3 w-full sm:w-auto justify-end">
                     <button
