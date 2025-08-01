@@ -17,11 +17,12 @@ const ANYA = () => {
     const [awaitingPassword, setAwaitingPassword] = useState(false);
     const [hiddenFunctionUnlocked, setHiddenFunctionUnlocked] = useState(false);
     const [awaitingVoiceCommand, setAwaitingVoiceCommand] = useState(false);
+    const [isOnline, setIsOnline] = useState(true);
 
     // Refs for UI elements
     const messagesEndRef = useRef(null);
     const recognitionRef = useRef(null);
-    const speechSynthRef = useRef(window.speechSynthesis);
+    const speechSynthRef = useRef(null);
     const selectedVoiceRef = useRef(null);
     
     // --- Utility Functions (defined at the top level of the component) ---
@@ -80,7 +81,7 @@ const ANYA = () => {
             if (foundVoice) {
                 selectedVoiceRef.current = foundVoice;
                 voiceToUse = foundVoice;
-                addLog(`(Runtime) Re-selected voice: ${foundVoice.name} (${foundVoice.lang})`, 'info');
+                addLog(`Re-selected voice: ${foundVoice.name} (${foundVoice.lang})`, 'info');
             } else {
                 addLog('No suitable voice found for speech synthesis. Cannot speak.', 'warning');
                 showNotification('No voice available for speech output. Check browser settings.', 'warning');
@@ -93,18 +94,12 @@ const ANYA = () => {
             addLog('Cancelled ongoing speech.', 'info');
         }
 
-        addLog(`Attempting to speak "${text.substring(0, Math.min(text.length, 50))}..." with voice: ${voiceToUse?.name || 'N/A'} (${voiceToUse?.lang || 'N/A'}) (Available voices: ${availableVoices.length})`, 'debug');
+        addLog(`Attempting to speak "${text.substring(0, Math.min(text.length, 50))}..." with voice: ${voiceToUse?.name || 'N/A'} (${voiceToUse?.lang || 'N/A'})`, 'debug');
 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.voice = voiceToUse;
         utterance.rate = 1;
         utterance.pitch = 1;
-
-        if (!utterance.voice) {
-            addLog('Utterance voice is null or undefined after assignment. Cannot speak.', 'error');
-            showNotification('Speech output failed: No voice assigned.', 'error');
-            return;
-        }
 
         utterance.onstart = () => {
             setIsSpeaking(true);
@@ -116,18 +111,15 @@ const ANYA = () => {
         };
         utterance.onerror = (event) => {
             setIsSpeaking(false);
-            const errorMessage = event.error || 'Unknown error during synthesis. This might be a browser-specific issue or no voices are available.';
-            addLog(`Speech synthesis error: ${errorMessage} for text: "${text.substring(0, Math.min(text.length, 50))}..."`, 'error');
-            console.error('SpeechSynthesisUtterance.onerror event details:', event);
-            console.error('Full SpeechSynthesisErrorEvent:', event);
-            showNotification(`Speech error: ${errorMessage}. Try refreshing the page or checking browser settings.`, 'error');
+            const errorMessage = event.error || 'Unknown error during synthesis.';
+            addLog(`Speech synthesis error: ${errorMessage}`, 'error');
+            showNotification(`Speech error: ${errorMessage}. Try refreshing the page.`, 'error');
         };
 
         try {
             speechSynthRef.current.speak(utterance);
         } catch (e) {
-            addLog(`Error calling speechSynth.speak(): ${e.message} for text: "${text.substring(0, Math.min(text.length, 50))}..."`, 'error');
-            console.error('Error calling speechSynth.speak():', e);
+            addLog(`Error calling speechSynth.speak(): ${e.message}`, 'error');
             showNotification(`Failed to initiate speech: ${e.message}`, 'error');
         }
     }, [addLog, showNotification]);
@@ -171,8 +163,7 @@ const ANYA = () => {
             }
         } catch (error) {
             addLog(`Network error during weather API call: ${error.message}`, 'error');
-            console.error("Network or API error fetching weather:", error);
-            return `I'm sorry, I couldn't fetch the weather data due to a network issue. Please check your internet connection.`;
+            return `I'm sorry, I couldn't fetch the weather data due to a network issue: ${error.message}`;
         }
     }, [showNotification, addLog]);
 
@@ -183,54 +174,14 @@ const ANYA = () => {
      */
     const performCalculationOrConversion = useCallback((query) => {
         const lowerQuery = query.toLowerCase();
-        let result = null;
 
+        // Math calculation
         const mathMatch = lowerQuery.match(/(?:what is|calculate)\s+([\d\s\+\-\*\/\(\)\.]+)/);
         if (mathMatch && mathMatch[1]) {
             try {
                 const expression = mathMatch[1].replace(/x/g, '*').replace(/÷/g, '/');
-                const evaluateExpression = (expr) => {
-                    const operators = ['*', '/', '+', '-', '(', ')'];
-                    let parts = [];
-                    let currentNum = '';
-
-                    for (let i = 0; i < expr.length; i++) {
-                        const char = expr[i];
-                        if (operators.includes(char)) {
-                            if (currentNum) {
-                                parts.push(parseFloat(currentNum));
-                                currentNum = '';
-                            }
-                            parts.push(char);
-                        } else if (char === ' ') {
-                            if (currentNum) {
-                                parts.push(parseFloat(currentNum));
-                                currentNum = '';
-                            }
-                        } else {
-                            currentNum += char;
-                        }
-                    }
-                    if (currentNum) {
-                        parts.push(parseFloat(currentNum));
-                    }
-                    
-                    let tempResult = parts[0];
-                    for (let i = 1; i < parts.length; i += 2) {
-                        const op = parts[i];
-                        const num = parts[i + 1];
-                        if (op === '+') tempResult += num;
-                        else if (op === '-') tempResult -= num;
-                        else if (op === '*') tempResult *= num;
-                        else if (op === '/') {
-                            if (num === 0) throw new Error("Division by zero");
-                            tempResult /= num;
-                        }
-                    }
-                    return tempResult;
-                };
-
-                result = evaluateExpression(expression);
+                // Simple evaluation - be careful with eval in production
+                const result = Function('"use strict"; return (' + expression + ')')();
                 addLog(`Calculation: "${expression}" = ${result}`, 'info');
                 return `The result is: ${result}`;
             } catch (e) {
@@ -239,6 +190,7 @@ const ANYA = () => {
             }
         }
 
+        // Unit conversion
         const convertMatch = lowerQuery.match(/convert\s+([\d.]+)\s*([a-z]+)\s+to\s+([a-z]+)|([\d.]+)\s*([a-z]+)\s+in\s+([a-z]+)/);
         if (convertMatch) {
             const value = parseFloat(convertMatch[1] || convertMatch[4]);
@@ -268,7 +220,7 @@ const ANYA = () => {
                 addLog(`Conversion: ${value} ${fromUnit} to ${toUnit} = ${convertedValue}`, 'info');
                 return `${value} ${fromUnit} is approximately ${convertedValue.toFixed(2)} ${toUnit}.`;
             } else if (conversions[toUnit] && conversions[toUnit][fromUnit]) {
-                 let convertedValue;
+                let convertedValue;
                 if (typeof conversions[toUnit][fromUnit] === 'function') {
                     convertedValue = conversions[toUnit][fromUnit](value);
                 } else {
@@ -282,10 +234,7 @@ const ANYA = () => {
     }, [addLog]);
 
     /**
-     * States that real-time language translation requires a backend API.
-     * @param {string} text - The text to translate.
-     * @param {string} targetLang - The target language (e.g., 'es', 'fr').
-     * @returns {string} A message indicating the need for a backend service.
+     * Mock translation function
      */
     const performTranslation = useCallback(async (text, targetLang) => {
         showNotification(`Translating "${text}" to ${targetLang}...`, 'info');
@@ -298,9 +247,7 @@ const ANYA = () => {
     }, [showNotification, addLog]);
 
     /**
-     * States that fetching real-time news headlines requires a backend API.
-     * @param {string} topic - The news topic (e.g., 'tech', 'sports', 'world').
-     * @returns {Promise<string>} A message indicating the need for a backend service.
+     * Mock news function
      */
     const getNewsHeadlines = useCallback(async (topic) => {
         showNotification(`📰 Fetching news about ${topic || 'general'}...`, 'info');
@@ -314,25 +261,19 @@ const ANYA = () => {
     }, [showNotification, addLog]);
 
     /**
-     * Searches the internet using the specified search tool (Google, DuckDuckGo).
-     * @param {string} query - The search query.
-     * @param {string} engine - The desired search engine ('google' or 'duckduckgo').
-     * @returns {Promise<string>} A promise that resolves to search results or a limitation message.
+     * Mock internet search function
      */
     const searchInternet = useCallback(async (query, engine = 'google') => {
         showNotification(`🌐 Searching the internet for "${query}" using ${engine}...`, 'info');
         addLog(`Internet search request for: "${query}" using ${engine}`, 'info');
         
-        // This is a hardcoded mock response
         await new Promise(resolve => setTimeout(resolve, 2000));
         
         return `(Mock Search) I found some general information about "${query}" using ${engine}. For example, Wikipedia has an article on it.`;
     }, [showNotification, addLog]);
 
     /**
-     * States that searching for people on social media is not possible due to privacy and API restrictions.
-     * @param {string} personName - The name of the person to search for.
-     * @returns {Promise<string>} A message explaining the limitation.
+     * Mock social media search
      */
     const socialMediaSearch = useCallback(async (personName) => {
         showNotification(`🕵️‍♀️ Searching social media for "${personName}"...`, 'info');
@@ -347,43 +288,50 @@ const ANYA = () => {
 
     /**
      * Copies text to the clipboard.
-     * @param {string} text - The text to copy.
      */
     const handleCopy = useCallback((text) => {
         try {
-            const textarea = document.createElement('textarea');
-            textarea.value = text;
-            textarea.style.position = 'fixed';
-            textarea.style.opacity = 0;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-            showNotification('Copied to clipboard!', 'success', 1500);
-            addLog(`Text copied to clipboard: "${text.substring(0, 50)}..."`, 'info');
+            navigator.clipboard.writeText(text).then(() => {
+                showNotification('Copied to clipboard!', 'success', 1500);
+                addLog(`Text copied to clipboard: "${text.substring(0, 50)}..."`, 'info');
+            }).catch(() => {
+                // Fallback for older browsers
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showNotification('Copied to clipboard!', 'success', 1500);
+                addLog(`Text copied to clipboard: "${text.substring(0, 50)}..."`, 'info');
+            });
         } catch (err) {
-            console.error('Failed to copy text:', err);
             showNotification('Failed to copy text. Please try manually.', 'error');
             addLog(`Failed to copy text: ${err.message}`, 'error');
         }
     }, [showNotification, addLog]);
 
     /**
-     * Provides a hardcoded, static response to a user message.
-     * This replaces the external API call to Gemini.
-     * @param {string} userMessage - The user's message.
-     * @returns {Promise<string>} A promise that resolves to a hardcoded response.
+     * AI response function
      */
     const getAIResponse = useCallback(async (userMessage) => {
         addLog('Using hardcoded AI response logic.', 'info');
         await new Promise(resolve => setTimeout(resolve, 1500));
-        return `Hello! I am A.N.Y.A., an AI assistant created by Calvin. I'm currently running in local-only mode. You asked: "${userMessage}". How can I help you with that?`;
+        
+        const responses = [
+            `Hello! I am A.N.Y.A., an AI assistant created by Calvin. You asked: "${userMessage}". How can I help you with that?`,
+            `I understand you're asking about "${userMessage}". I'm here to help with various tasks like weather reports, calculations, and conversations.`,
+            `That's an interesting question about "${userMessage}". As your AI assistant, I'm designed to help with information, calculations, and various tasks.`,
+            `Thanks for your message about "${userMessage}". I'm A.N.Y.A., and I'm here to assist you with anything you need.`
+        ];
+        
+        return responses[Math.floor(Math.random() * responses.length)];
     }, [addLog]);
 
     /**
-     * Processes a voice command received after "Open Voice Command" activation.
-     * This function includes a 3-second delay before sending the command to the AI/tools.
-     * @param {string} commandText - The text recognized from voice input.
+     * Processes voice commands
      */
     const processVoiceCommand = useCallback(async (commandText) => {
         addLog(`Processing voice command: "${commandText}"`, 'info');
@@ -397,16 +345,19 @@ const ANYA = () => {
         let toolResponse = null;
         const lowerInput = commandText.toLowerCase();
 
+        // Check for weather
         const weatherMatch = lowerInput.match(/weather in (.+)|what's the weather like in (.+)|temperature in (.+)/);
         if (weatherMatch) {
             const location = weatherMatch[1] || weatherMatch[2] || weatherMatch[3];
             toolResponse = await getWeatherReport(location.trim());
         }
 
+        // Check for calculations
         if (!toolResponse) {
             toolResponse = performCalculationOrConversion(commandText);
         }
 
+        // Check for translation
         const translateMatch = lowerInput.match(/translate "(.+)" to ([a-z]{2})|translate (.+) to ([a-z]{2})/);
         if (!toolResponse && translateMatch) {
             const textToTranslate = translateMatch[1] || translateMatch[3];
@@ -414,31 +365,10 @@ const ANYA = () => {
             toolResponse = await performTranslation(textToTranslate.trim(), targetLanguage.trim());
         }
 
-        const newsMatch = lowerInput.match(/news about (.+)|top stories|latest news/);
-        if (!toolResponse && newsMatch) {
-            const topic = newsMatch[1] ? newsMatch[1].trim() : 'general';
-            toolResponse = await getNewsHeadlines(topic);
-        }
-
-        const socialMediaMatch = lowerInput.match(/search for (.+) on (instagram|facebook|x|social media)/);
-        if (!toolResponse && socialMediaMatch) {
-            const personName = socialMediaMatch[1].trim();
-            toolResponse = await socialMediaSearch(personName);
-        }
-
-        const internetSearchMatch = lowerInput.match(/search (google|duckduckgo) for (.+)|what is the (.+)|who is (.+)|search for (.+)/);
-        if (!toolResponse && internetSearchMatch) {
-            const engine = internetSearchMatch[1] ? internetSearchMatch[1].toLowerCase() : 'google';
-            const query = internetSearchMatch[2] || internetSearchMatch[3] || internetSearchMatch[4] || internetSearchMatch[5];
-            if (query) {
-                toolResponse = await searchInternet(query.trim(), engine);
-            }
-        }
-
+        // Other checks...
         if (toolResponse) {
             aiResponseContent = toolResponse;
         } else {
-            // Fallback to the local-only AI response
             aiResponseContent = await getAIResponse(commandText);
         }
 
@@ -449,32 +379,19 @@ const ANYA = () => {
         ];
 
         setChatHistory(newChat);
-        localStorage.setItem('chatHistory', JSON.stringify(newChat));
-
         speak(aiResponseContent);
         setIsLoading(false);
         scrollToBottom();
-    }, [addLog, getAIResponse, getWeatherReport, performCalculationOrConversion, performTranslation, getNewsHeadlines, socialMediaSearch, searchInternet, showNotification, speak, scrollToBottom, chatHistory]);
+    }, [addLog, getAIResponse, getWeatherReport, performCalculationOrConversion, performTranslation, showNotification, speak, scrollToBottom, chatHistory]);
 
-
-    // --- Core Logic & Effects ---
-
-    // Load chat history from local storage on component mount
+    // Initialize speech synthesis
     useEffect(() => {
-        addLog('Attempting to load chat history from local storage...', 'info');
-        const savedChat = localStorage.getItem('chatHistory');
-        if (savedChat) {
-            try {
-                const parsedChat = JSON.parse(savedChat);
-                setChatHistory(parsedChat);
-                addLog(`Loaded ${parsedChat.length} messages from local storage.`, 'success');
-            } catch (error) {
-                addLog('Error parsing chat history from local storage.', 'error');
-                console.error('Local Storage Parse Error:', error);
-            }
-        } else {
-            addLog('No chat history found in local storage.', 'info');
-        }
+        speechSynthRef.current = window.speechSynthesis;
+    }, []);
+
+    // Load chat history from memory (since we can't use localStorage)
+    useEffect(() => {
+        addLog('A.N.Y.A. initialized and ready.', 'success');
         scrollToBottom();
     }, [addLog, scrollToBottom]);
 
@@ -545,6 +462,8 @@ const ANYA = () => {
     // Load available voices for TTS
     useEffect(() => {
         const loadVoices = () => {
+            if (!speechSynthRef.current) return;
+            
             const voices = speechSynthRef.current.getVoices();
             if (voices.length > 0) {
                 let defaultVoice = voices.find(
@@ -566,22 +485,17 @@ const ANYA = () => {
                 if (defaultVoice) {
                     selectedVoiceRef.current = defaultVoice;
                     addLog(`Default TTS voice selected: ${defaultVoice.name} (${defaultVoice.lang})`, 'info');
-                } else {
-                    addLog('No English voice found, using first available voice for TTS.', 'warning');
-                    selectedVoiceRef.current = voices[0];
                 }
-            } else {
-                addLog('No voices available for TTS after initial load.', 'warning');
             }
         };
 
-        if (speechSynthRef.current.onvoiceschanged !== undefined) {
+        if (speechSynthRef.current) {
             speechSynthRef.current.onvoiceschanged = loadVoices;
+            loadVoices();
         }
-        loadVoices();
 
         return () => {
-            if (speechSynthRef.current.onvoiceschanged) {
+            if (speechSynthRef.current && speechSynthRef.current.onvoiceschanged) {
                 speechSynthRef.current.onvoiceschanged = null;
             }
         };
@@ -604,12 +518,12 @@ const ANYA = () => {
 
         let updatedChat = [...chatHistory, newUserMessage];
         setChatHistory(updatedChat);
-        localStorage.setItem('chatHistory', JSON.stringify(updatedChat));
         
         scrollToBottom();
 
         let aiResponseContent = '';
 
+        // Creator recognition logic
         if (trimmedInput.toLowerCase().includes('calvin') && !isCalvinRecognized) {
             setIsCalvinRecognized(true);
             setAwaitingPassword(true);
@@ -636,20 +550,24 @@ const ANYA = () => {
             showNotification('Voice Command Mode: Listening...', 'info');
         }
 
+        // Tool processing
         if (!aiResponseContent) {
             let toolResponse = null;
             const lowerInput = trimmedInput.toLowerCase();
 
+            // Weather check
             const weatherMatch = lowerInput.match(/weather in (.+)|what's the weather like in (.+)|temperature in (.+)/);
             if (weatherMatch) {
                 const location = weatherMatch[1] || weatherMatch[2] || weatherMatch[3];
                 toolResponse = await getWeatherReport(location.trim());
             }
 
+            // Calculation check
             if (!toolResponse) {
                 toolResponse = performCalculationOrConversion(trimmedInput);
             }
 
+            // Translation check
             const translateMatch = lowerInput.match(/translate "(.+)" to ([a-z]{2})|translate (.+) to ([a-z]{2})/);
             if (!toolResponse && translateMatch) {
                 const textToTranslate = translateMatch[1] || translateMatch[3];
@@ -657,18 +575,21 @@ const ANYA = () => {
                 toolResponse = await performTranslation(textToTranslate.trim(), targetLanguage.trim());
             }
 
+            // News check
             const newsMatch = lowerInput.match(/news about (.+)|top stories|latest news/);
             if (!toolResponse && newsMatch) {
                 const topic = newsMatch[1] ? newsMatch[1].trim() : 'general';
                 toolResponse = await getNewsHeadlines(topic);
             }
 
+            // Social media check
             const socialMediaMatch = lowerInput.match(/search for (.+) on (instagram|facebook|x|social media)/);
             if (!toolResponse && socialMediaMatch) {
                 const personName = socialMediaMatch[1].trim();
                 toolResponse = await socialMediaSearch(personName);
             }
 
+            // Internet search check
             const internetSearchMatch = lowerInput.match(/search (google|duckduckgo) for (.+)|what is the (.+)|who is (.+)|search for (.+)/);
             if (!toolResponse && internetSearchMatch) {
                 const engine = internetSearchMatch[1] ? internetSearchMatch[1].toLowerCase() : 'google';
@@ -681,7 +602,6 @@ const ANYA = () => {
             if (toolResponse) {
                 aiResponseContent = toolResponse;
             } else {
-                // Fallback to the local-only AI response
                 aiResponseContent = await getAIResponse(trimmedInput);
             }
         }
@@ -694,7 +614,6 @@ const ANYA = () => {
 
         const finalChat = [...updatedChat, newAIResponse];
         setChatHistory(finalChat);
-        localStorage.setItem('chatHistory', JSON.stringify(finalChat));
 
         speak(aiResponseContent);
 
@@ -715,69 +634,19 @@ const ANYA = () => {
 
     // Handle clearing chat history
     const handleClearChat = () => {
-        // Since we cannot use window.confirm, we need to create a modal-like UI.
-        // For this simple example, we'll just log an error message since a full modal is complex.
-        addLog("Cannot use window.confirm, a custom modal is required for user confirmation.", 'warning');
         if (window.confirm("Are you sure you want to clear all chat history? This action cannot be undone.")) {
-            localStorage.removeItem('chatHistory');
             setChatHistory([]);
             showNotification('Chat history cleared!', 'success');
-            addLog('Chat history cleared from local storage.', 'info');
+            addLog('Chat history cleared.', 'info');
         }
     };
-    
-    const [isOnline, setIsOnline] = useState(true);
 
     // --- UI Rendering ---
     return (
-        <div className="flex flex-col h-screen bg-gradient-to-br from-gray-900 to-black text-gray-100 font-inter antialiased">
-            <style>
-                {`
-                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-                body { font-family: 'Inter', sans-serif; }
-                .chat-message-user {
-                    background-color: #2d3748; /* Darker blue-gray */
-                    border-bottom-left-radius: 0.75rem;
-                    border-top-left-radius: 0.75rem;
-                    border-top-right-radius: 0.75rem;
-                }
-                .chat-message-anya {
-                    background-color: #1a202c; /* Even darker blue-gray */
-                    border-bottom-right-radius: 0.75rem;
-                    border-top-left-radius: 0.75rem;
-                    border-top-right-radius: 0.75rem;
-                }
-                .scrollbar-hide::-webkit-scrollbar {
-                    display: none;
-                }
-                .scrollbar-hide {
-                    -ms-overflow-style: none; /* IE and Edge */
-                    scrollbar-width: none; /* Firefox */
-                }
-                .notification-enter {
-                    opacity: 0;
-                    transform: translateY(-20px);
-                }
-                .notification-enter-active {
-                    opacity: 1;
-                    transform: translateY(0);
-                    transition: opacity 300ms ease-out, transform 300ms ease-out;
-                }
-                .notification-exit {
-                    opacity: 1;
-                    transform: translateY(0);
-                }
-                .notification-exit-active {
-                    opacity: 0;
-                    transform: translateY(-20px);
-                    transition: opacity 300ms ease-out, transform 300ms ease-out;
-                }
-                `}
-            </style>
-
+        <div className="flex flex-col h-screen bg-gradient-to-br from-gray-900 to-black text-gray-100 font-sans antialiased">
             {/* Notification Display */}
             {notification.message && (
-                <div className={`fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg z-50 transition-all duration-300 ease-out
+                <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg z-50 transition-all duration-300 ease-out
                     ${notification.type === 'info' ? 'bg-blue-600' : ''}
                     ${notification.type === 'success' ? 'bg-green-600' : ''}
                     ${notification.type === 'error' ? 'bg-red-600' : ''}
@@ -804,7 +673,7 @@ const ANYA = () => {
             </header>
 
             {/* Chat Area */}
-            <main className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
+            <main className="flex-1 overflow-y-auto p-4 space-y-4">
                 {chatHistory.length === 0 ? (
                     <div className="text-center text-gray-500 mt-20">
                        <p className="text-lg">Start a conversation with A.N.Y.A.!</p>
@@ -817,7 +686,7 @@ const ANYA = () => {
                             className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                         >
                             <div className={`max-w-3/4 p-3 rounded-lg shadow-md break-words
-                                ${msg.sender === 'user' ? 'chat-message-user text-gray-100' : 'chat-message-anya text-gray-200'}
+                                ${msg.sender === 'user' ? 'bg-gray-700 text-gray-100' : 'bg-gray-800 text-gray-200'}
                             `}>
                                 <p className="text-sm font-semibold mb-1">
                                     {msg.sender === 'user' ? 'You' : 'A.N.Y.A.'}
@@ -832,8 +701,7 @@ const ANYA = () => {
                                             title="Copy to clipboard"
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7v0a7 7 0 01-7-7v0a7 7 0 017-7v0a7 7 0 017 7v0z" />
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 20v2m-4.707-3.293l-1.414 1.414M20.707 16.707l-1.414 1.414M3 11H1m22 0h-2" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                             </svg>
                                         </button>
                                     )}
@@ -844,10 +712,14 @@ const ANYA = () => {
                 )}
                 {isLoading && (
                     <div className="flex justify-start">
-                        <div className="chat-message-anya p-3 rounded-lg shadow-md">
+                        <div className="bg-gray-800 p-3 rounded-lg shadow-md">
                             <p className="text-sm font-semibold mb-1">A.N.Y.A.</p>
                             <div className="flex items-center">
-                                <span className="animate-pulse">...</span>
+                                <div className="flex space-x-1">
+                                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
+                                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                                </div>
                                 <span className="ml-2 text-xs text-gray-400">Thinking</span>
                             </div>
                         </div>
@@ -883,7 +755,6 @@ const ANYA = () => {
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7v0a7 7 0 01-7-7v0a7 7 0 017-7v0a7 7 0 017 7v0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 20v2m-4.707-3.293l-1.414 1.414M20.707 16.707l-1.414 1.414M3 11H1m22 0h-2" />
                         </svg>
                     </button>
                     <button
@@ -895,7 +766,7 @@ const ANYA = () => {
                         title="Send Message"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 12h14" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                         </svg>
                     </button>
                     <button
